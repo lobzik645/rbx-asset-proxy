@@ -1,7 +1,6 @@
 # 🚀 Roblox Asset Proxy (`rbx-asset-proxy`)
 
 <p align="center">
-  <img src="icon.png" width="100" height="100" alt="Roblox Asset Proxy Logo">
   <br>
   <b>Lightweight Windows System Tray Proxy & DNS Fix for Roblox Textures, Thumbnails, and Assets</b>
   <br>

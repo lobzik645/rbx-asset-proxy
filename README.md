@@ -42,7 +42,7 @@ In certain regions (notably Russia / CIS), Roblox players frequently encounter g
 ### 📦 Installation & Usage
 
 #### Option 1: Standalone EXE (Recommended)
-1. Download **`RobloxProxy.exe`** from the [Releases]([https://github.com/](https://github.com/lobzik645/rbx-asset-proxy/releases/tag/v1.0.0)) section.
+1. Download **`RobloxProxy.exe`** from the [Releases](https://github.com/lobzik645/rbx-asset-proxy/releases/tag/v1.0.0) section.
 2. Run `RobloxProxy.exe`.
 3. Click **"⚡ Починить картинки и плейсы в лаунчере"** (or approve the one-time Windows UAC prompt).
 4. Launch Roblox — all icons and textures will load immediately!
@@ -78,7 +78,7 @@ pythonw tray_app.py
 
 ### 🛠️ Быстрый старт
 
-1. Скачайте **`RobloxProxy.exe`** из раздела [Releases]([https://github.com/](https://github.com/lobzik645/rbx-asset-proxy/releases/tag/v1.0.0)).
+1. Скачайте **`RobloxProxy.exe`** из раздела [Releases](https://github.com/lobzik645/rbx-asset-proxy/releases/tag/v1.0.0).
 2. Запустите `RobloxProxy.exe`.
 3. В окне программы нажмите синюю кнопку **`⚡ Починить картинки и плейсы в лаунчере (1 клик)`** и подтвердите права администратора в окне Windows (кнопка станет зелёной ✅).
 4. Запустите лаунчер Roblox — все значки плейсов, аватарки и текстуры загрузятся моментально!

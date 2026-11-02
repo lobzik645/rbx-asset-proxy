@@ -19,8 +19,9 @@ import time
 import urllib.request
 import winreg
 
-from PyQt6.QtCore import Qt, QTimer, QRect, QUrl
+from PyQt6.QtCore import Qt, QTimer, QByteArray, QRect, QSize, QUrl
 from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap, QBrush, QDesktopServices
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -30,6 +31,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSystemTrayIcon,
     QTableWidget,
@@ -58,6 +60,78 @@ ROBLOX_DOMAINS = [
 log_queue = queue.Queue()
 
 
+# ---------------------------------------------------------------------------
+# Feather/Lucide-style SVG icons, rendered at runtime via QtSvg (no assets needed)
+# ---------------------------------------------------------------------------
+
+_SVG_HEAD = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" '
+    'fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+)
+_SVG_TAIL = "</svg>"
+
+_SVGS = {
+    "zap": '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+    "check-circle": '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+    "settings": (
+        '<circle cx="12" cy="12" r="3"/>'
+        '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 '
+        '1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 '
+        '0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 '
+        '1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 '
+        '1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 '
+        '0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 '
+        '1.65 0 0 0-1.51 1z"/>'
+    ),
+    "rocket": (
+        '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>'
+        '<path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>'
+        '<path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/>'
+        '<path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>'
+    ),
+    "shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    "heart": '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>',
+    "send": '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+    "megaphone": '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+    "x": '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    "power": '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
+    "trash": (
+        '<polyline points="3 6 5 6 21 6"/>'
+        '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
+        '<line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'
+    ),
+    "copy": '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    "credit-card": '<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>',
+    "gem": '<path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/>',
+    "user": '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
+    "activity": '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+    "circle-dot": '<circle cx="12" cy="12" r="6" fill="{c}" stroke="none"/>',
+}
+
+
+def make_icon(name: str, color: str = "#ffffff", size: int = 64) -> QIcon:
+    """Renders one of the bundled SVG icons into a crisp QIcon of any size."""
+    svg = (_SVG_HEAD + _SVGS[name] + _SVG_TAIL).format(c=color)
+    renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def icon_label(name: str, color: str = "#ffffff", size: int = 16) -> QLabel:
+    """Small non-interactive QLabel showing an SVG icon (for section headers)."""
+    label = QLabel()
+    label.setPixmap(make_icon(name, color, size=96).pixmap(size, size))
+    label.setFixedSize(size, size)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return label
+
+
 def is_hosts_dns_fixed() -> bool:
     """Checks if tr.rbxcdn.com is mapped in Windows hosts file."""
     try:
@@ -68,23 +142,39 @@ def is_hosts_dns_fixed() -> bool:
         return False
 
 
-def apply_hosts_dns_fix():
-    """Applies DNS fix via Base64-encoded elevated PowerShell command. Immune to quoting/path/encoding issues."""
+def apply_hosts_dns_fix() -> bool:
+    """Applies DNS fix via Base64-encoded elevated PowerShell command. Immune to quoting/path/encoding issues.
+
+    Creates the hosts file (and the etc directory) if the system is missing it,
+    then appends the tr.rbxcdn.com entries. Returns True if the elevated script was launched.
+    """
     ps_code = """
-$hosts = [System.IO.Path]::Combine($env:WINDIR, 'System32\\drivers\\etc\\hosts')
-$lines = "`r`n# Roblox Asset CDN DNS Fix`r`n108.157.229.101 tr.rbxcdn.com`r`n108.157.229.27 tr.rbxcdn.com`r`n108.157.229.26 tr.rbxcdn.com`r`n108.157.229.100 tr.rbxcdn.com`r`n"
-$current = [System.IO.File]::ReadAllText($hosts)
-if (-not $current.Contains('tr.rbxcdn.com')) {
-    [System.IO.File]::AppendAllText($hosts, $lines, [System.Text.Encoding]::UTF8)
-    Write-Host "[OK] Added tr.rbxcdn.com to hosts successfully!" -ForegroundColor Green
-} else {
-    Write-Host "[OK] tr.rbxcdn.com is already present in hosts." -ForegroundColor Yellow
+$ErrorActionPreference = 'Stop'
+$hostsPath = [System.IO.Path]::Combine($env:WINDIR, 'System32\\drivers\\etc\\hosts')
+try {
+    if (-not [System.IO.File]::Exists($hostsPath)) {
+        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($hostsPath)) | Out-Null
+        [System.IO.File]::WriteAllText($hostsPath, '# Roblox Asset Proxy hosts file' + [Environment]::NewLine, [System.Text.Encoding]::ASCII)
+        Write-Host '[OK] hosts file was missing - created a new one.' -ForegroundColor Yellow
+    }
+    $lines = "`r`n# Roblox Asset CDN DNS Fix`r`n108.157.229.101 tr.rbxcdn.com`r`n108.157.229.27 tr.rbxcdn.com`r`n108.157.229.26 tr.rbxcdn.com`r`n108.157.229.100 tr.rbxcdn.com`r`n"
+    $current = [System.IO.File]::ReadAllText($hostsPath)
+    if (-not $current.Contains('tr.rbxcdn.com')) {
+        [System.IO.File]::AppendAllText($hostsPath, $lines, [System.Text.Encoding]::ASCII)
+        Write-Host '[OK] Added tr.rbxcdn.com to hosts successfully!' -ForegroundColor Green
+    } else {
+        Write-Host '[OK] tr.rbxcdn.com is already present in hosts.' -ForegroundColor Yellow
+    }
+    ipconfig /flushdns
+} catch {
+    Write-Host ('[ERROR] ' + $_.Exception.Message) -ForegroundColor Red
+    Start-Sleep -Seconds 5
+    exit 1
 }
-ipconfig /flushdns
 Start-Sleep -Milliseconds 1200
 """
     b64 = base64.b64encode(ps_code.encode("utf-16le")).decode("ascii")
-    ctypes.windll.shell32.ShellExecuteW(
+    result = ctypes.windll.shell32.ShellExecuteW(
         None,
         "runas",
         "powershell.exe",
@@ -92,6 +182,7 @@ Start-Sleep -Milliseconds 1200
         None,
         1 # SW_SHOWNORMAL (displays quick window confirming [OK])
     )
+    return result > 32
 
 
 class WindowsProxyManager:
@@ -531,7 +622,7 @@ class DonateDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("❤️ Поддержать автора (Донат)")
+        self.setWindowTitle("Поддержать автора (Донат)")
         self.setFixedSize(530, 490)
         self.setStyleSheet("""
             QDialog {
@@ -570,9 +661,13 @@ class DonateDialog(QDialog):
         layout.setSpacing(12)
 
         # Header
-        title = QLabel("💖 Поддержка проекта RobloxProxy")
+        title_row = QHBoxLayout()
+        title_row.addWidget(icon_label("heart", "#e6232d", 20))
+        title = QLabel("Поддержка проекта RobloxProxy")
         title.setStyleSheet("font-size: 17px; font-weight: bold; color: #ffffff;")
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        layout.addLayout(title_row)
 
         subtitle = QLabel(
             "Программа полностью бесплатная! Если она помогла вернуть текстуры, "
@@ -590,9 +685,13 @@ class DonateDialog(QDialog):
         card_layout.setContentsMargins(14, 10, 14, 10)
         card_layout.setSpacing(6)
 
-        c_title = QLabel("💳 Банковская карта (RU):")
+        c_title_row = QHBoxLayout()
+        c_title_row.addWidget(icon_label("credit-card", "#4cd964", 14))
+        c_title = QLabel("Банковская карта (RU):")
         c_title.setStyleSheet("font-weight: bold; font-size: 12px; color: #4cd964; border: none;")
-        card_layout.addWidget(c_title)
+        c_title_row.addWidget(c_title)
+        c_title_row.addStretch()
+        card_layout.addLayout(c_title_row)
 
         card_row = QHBoxLayout()
         self.lbl_card_num = QLabel("2200 7021 6738 7641")
@@ -600,7 +699,9 @@ class DonateDialog(QDialog):
         card_row.addWidget(self.lbl_card_num)
         card_row.addStretch()
 
-        self.btn_copy_card = QPushButton("📋 Скопировать")
+        self.btn_copy_card = QPushButton("Скопировать")
+        self.btn_copy_card.setIcon(make_icon("copy", "#ffffff"))
+        self.btn_copy_card.setIconSize(QSize(14, 14))
         self.btn_copy_card.clicked.connect(self.copy_card)
         card_row.addWidget(self.btn_copy_card)
         card_layout.addLayout(card_row)
@@ -614,9 +715,13 @@ class DonateDialog(QDialog):
         ton_layout.setContentsMargins(14, 10, 14, 10)
         ton_layout.setSpacing(6)
 
-        t_title = QLabel("💎 TON / Gram кошелек (DeFi):")
+        t_title_row = QHBoxLayout()
+        t_title_row.addWidget(icon_label("gem", "#229ED9", 14))
+        t_title = QLabel("TON / Gram кошелек (DeFi):")
         t_title.setStyleSheet("font-weight: bold; font-size: 12px; color: #229ED9; border: none;")
-        ton_layout.addWidget(t_title)
+        t_title_row.addWidget(t_title)
+        t_title_row.addStretch()
+        ton_layout.addLayout(t_title_row)
 
         self.ton_address = "UQCn9ZKq8URRXFgv0zEQa9AbIQNqS6tN3xRI6p5u0vE2a9TL"
         self.lbl_ton = QLabel(self.ton_address)
@@ -626,7 +731,9 @@ class DonateDialog(QDialog):
 
         ton_btn_row = QHBoxLayout()
         ton_btn_row.addStretch()
-        self.btn_copy_ton = QPushButton("📋 Скопировать адрес")
+        self.btn_copy_ton = QPushButton("Скопировать адрес")
+        self.btn_copy_ton.setIcon(make_icon("copy", "#ffffff"))
+        self.btn_copy_ton.setIconSize(QSize(14, 14))
         self.btn_copy_ton.clicked.connect(self.copy_ton)
         ton_btn_row.addWidget(self.btn_copy_ton)
         ton_layout.addLayout(ton_btn_row)
@@ -640,12 +747,18 @@ class DonateDialog(QDialog):
         author_layout.setContentsMargins(14, 10, 14, 10)
         author_layout.setSpacing(8)
 
-        a_title = QLabel("👤 Автор и разработчик:")
+        a_title_row = QHBoxLayout()
+        a_title_row.addWidget(icon_label("user", "#ffffff", 14))
+        a_title = QLabel("Автор и разработчик:")
         a_title.setStyleSheet("font-weight: bold; font-size: 12px; color: #ffffff; border: none;")
-        author_layout.addWidget(a_title)
+        a_title_row.addWidget(a_title)
+        a_title_row.addStretch()
+        author_layout.addLayout(a_title_row)
 
         links_row = QHBoxLayout()
-        self.btn_tg_author = QPushButton("✈️ Telegram: @artehall")
+        self.btn_tg_author = QPushButton("Telegram: @artehall")
+        self.btn_tg_author.setIcon(make_icon("send", "#2bb3f5"))
+        self.btn_tg_author.setIconSize(QSize(14, 14))
         self.btn_tg_author.setStyleSheet("""
             QPushButton {
                 background-color: #203347;
@@ -663,7 +776,9 @@ class DonateDialog(QDialog):
         self.btn_tg_author.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/artehall")))
         links_row.addWidget(self.btn_tg_author)
 
-        self.btn_tg_channel = QPushButton("📢 Личный канал автора")
+        self.btn_tg_channel = QPushButton("Личный канал автора")
+        self.btn_tg_channel.setIcon(make_icon("megaphone", "#2bb3f5"))
+        self.btn_tg_channel.setIconSize(QSize(14, 14))
         self.btn_tg_channel.setStyleSheet("""
             QPushButton {
                 background-color: #203347;
@@ -688,18 +803,28 @@ class DonateDialog(QDialog):
 
         # Close button
         btn_close = QPushButton("Закрыть")
+        btn_close.setIcon(make_icon("x", "#aaaaaa"))
+        btn_close.setIconSize(QSize(14, 14))
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
+    def _flash_copied(self, button: QPushButton, base_text: str):
+        button.setText("Скопировано!")
+        button.setIcon(make_icon("check-circle", "#4cd964"))
+
+        def restore():
+            button.setText(base_text)
+            button.setIcon(make_icon("copy", "#ffffff"))
+
+        QTimer.singleShot(2000, restore)
+
     def copy_card(self):
         QApplication.clipboard().setText("2200702167387641")
-        self.btn_copy_card.setText("✅ Скопировано!")
-        QTimer.singleShot(2000, lambda: self.btn_copy_card.setText("📋 Скопировать"))
+        self._flash_copied(self.btn_copy_card, "Скопировать")
 
     def copy_ton(self):
         QApplication.clipboard().setText(self.ton_address)
-        self.btn_copy_ton.setText("✅ Скопировано!")
-        QTimer.singleShot(2000, lambda: self.btn_copy_ton.setText("📋 Скопировать адрес"))
+        self._flash_copied(self.btn_copy_ton, "Скопировать адрес")
 
 
 class SettingsDialog(QDialog):
@@ -709,7 +834,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.proxy_server = proxy_server
         self.setWindowTitle("Roblox Asset Proxy — Настройки и Журнал")
-        self.resize(650, 520)
+        self.resize(650, 540)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1a1a1a;
@@ -719,6 +844,16 @@ class SettingsDialog(QDialog):
             QLabel {
                 color: #e0e0e0;
                 font-size: 13px;
+                background: transparent;
+            }
+            QFrame#optionsCard {
+                background-color: #222222;
+                border: 1px solid #333333;
+                border-radius: 10px;
+            }
+            QFrame#optionsCard QCheckBox {
+                background: transparent;
+                border: none;
             }
             QTableWidget {
                 background-color: #242424;
@@ -727,6 +862,7 @@ class SettingsDialog(QDialog):
                 color: #ffffff;
                 gridline-color: #2e2e2e;
                 font-size: 12px;
+                alternate-background-color: #282828;
             }
             QTableWidget::item {
                 padding: 6px;
@@ -783,14 +919,15 @@ class SettingsDialog(QDialog):
 
         # Header with status
         header_layout = QHBoxLayout()
-        title_label = QLabel("🚀 Roblox Asset Proxy")
+        header_layout.addWidget(icon_label("shield", "#e6232d", 22))
+        title_label = QLabel("Roblox Asset Proxy")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
-        self.status_label = QLabel("🟢 Активен (127.0.0.1:8989)")
-        self.status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #4cd964;")
+        self.status_label = QLabel("Активен · 127.0.0.1:8989")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.status_label)
         layout.addLayout(header_layout)
+        self.set_status_active(True)
 
         # Embedded DNS Fix Button with live status
         self.btn_dns_fix = QPushButton()
@@ -798,9 +935,12 @@ class SettingsDialog(QDialog):
         self.btn_dns_fix.clicked.connect(self.on_click_dns_fix)
         layout.addWidget(self.btn_dns_fix)
 
-        # Options layout
-        options_layout = QVBoxLayout()
-        options_layout.setSpacing(8)
+        # Options card
+        options_card = QFrame()
+        options_card.setObjectName("optionsCard")
+        options_layout = QVBoxLayout(options_card)
+        options_layout.setContentsMargins(14, 12, 14, 12)
+        options_layout.setSpacing(10)
 
         self.cb_system_proxy = QCheckBox("Полный системный прокси (рекомендуется для лаунчера и игры)")
         self.cb_system_proxy.setChecked(self.proxy_server.use_system_proxy)
@@ -817,10 +957,11 @@ class SettingsDialog(QDialog):
         self.cb_autostart.stateChanged.connect(self.on_autostart_changed)
         options_layout.addWidget(self.cb_autostart)
 
-        layout.addLayout(options_layout)
+        layout.addWidget(options_card)
 
         # Table label & counter
         table_header = QHBoxLayout()
+        table_header.addWidget(icon_label("activity", "#e6232d", 14))
         log_label = QLabel("Журнал загруженных ассетов:")
         log_label.setStyleSheet("font-weight: bold; color: #aaaaaa;")
         self.counter_label = QLabel("Загружено: 0 ассетов")
@@ -838,17 +979,23 @@ class SettingsDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
 
         # Bottom buttons
         btn_layout = QHBoxLayout()
         self.btn_clear = QPushButton("Очистить журнал")
+        self.btn_clear.setIcon(make_icon("trash", "#aaaaaa"))
+        self.btn_clear.setIconSize(QSize(14, 14))
         self.btn_clear.clicked.connect(self.clear_logs)
         btn_layout.addWidget(self.btn_clear)
 
         btn_layout.addStretch()
 
-        self.btn_donate = QPushButton("💖 Поддержать автора")
+        self.btn_donate = QPushButton("Поддержать автора")
+        self.btn_donate.setIcon(make_icon("heart", "#ffffff"))
+        self.btn_donate.setIconSize(QSize(14, 14))
         self.btn_donate.setStyleSheet("""
             QPushButton {
                 background-color: #8a1922;
@@ -868,6 +1015,8 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(self.btn_donate)
 
         self.btn_close = QPushButton("Свернуть в трей")
+        self.btn_close.setIcon(make_icon("chevron-down", "#aaaaaa"))
+        self.btn_close.setIconSize(QSize(14, 14))
         self.btn_close.clicked.connect(self.hide)
         self.btn_close.setStyleSheet("background-color: #2d2d2d; border-color: #3d3d3d;")
         btn_layout.addWidget(self.btn_close)
@@ -896,19 +1045,32 @@ class SettingsDialog(QDialog):
 
         self.total_assets = 0
 
+    def set_status_active(self, active: bool):
+        color = "#4cd964" if active else "#ff3b30"
+        base = "rgba(76, 217, 100, 0.12)" if active else "rgba(255, 59, 48, 0.12)"
+        border = "rgba(76, 217, 100, 0.35)" if active else "rgba(255, 59, 48, 0.35)"
+        self.status_label.setText("Активен · 127.0.0.1:8989" if active else "Остановлен")
+        self.status_label.setStyleSheet(
+            f"font-size: 12px; font-weight: bold; color: {color};"
+            f"background-color: {base}; border: 1px solid {border};"
+            "border-radius: 10px; padding: 4px 12px;"
+        )
+
     def open_donate_dialog(self):
         dlg = DonateDialog(self)
         dlg.exec()
 
     def update_dns_button_state(self):
         if is_hosts_dns_fixed():
-            self.btn_dns_fix.setText("✅ DNS-фикс применён (tr.rbxcdn.com активен)")
+            self.btn_dns_fix.setText("DNS-фикс применён — tr.rbxcdn.com активен")
+            self.btn_dns_fix.setIcon(make_icon("check-circle", "#a5d6a7"))
+            self.btn_dns_fix.setIconSize(QSize(20, 20))
             self.btn_dns_fix.setStyleSheet("""
                 QPushButton {
                     background-color: #2e7d32;
                     border: 1px solid #388e3c;
-                    border-radius: 6px;
-                    padding: 10px 16px;
+                    border-radius: 8px;
+                    padding: 11px 16px;
                     font-size: 13px;
                     font-weight: bold;
                     color: #ffffff;
@@ -916,13 +1078,15 @@ class SettingsDialog(QDialog):
             """)
             self.btn_dns_fix.setEnabled(False)
         else:
-            self.btn_dns_fix.setText("⚡ Починить картинки и плейсы в лаунчере (1 клик)")
+            self.btn_dns_fix.setText("Починить картинки и плейсы в лаунчере (1 клик)")
+            self.btn_dns_fix.setIcon(make_icon("zap", "#ffd54f"))
+            self.btn_dns_fix.setIconSize(QSize(20, 20))
             self.btn_dns_fix.setStyleSheet("""
                 QPushButton {
                     background-color: #0078d4;
                     border: 1px solid #005a9e;
-                    border-radius: 6px;
-                    padding: 10px 16px;
+                    border-radius: 8px;
+                    padding: 11px 16px;
                     font-size: 13px;
                     font-weight: bold;
                     color: #ffffff;
@@ -934,7 +1098,13 @@ class SettingsDialog(QDialog):
             self.btn_dns_fix.setEnabled(True)
 
     def on_click_dns_fix(self):
-        apply_hosts_dns_fix()
+        if not apply_hosts_dns_fix():
+            QMessageBox.warning(
+                self,
+                "DNS-фикс",
+                "Не удалось запустить скрипт с правами администратора.\n"
+                "Подтвердите запрос контроля учётных записей (UAC) и попробуйте снова."
+            )
         for delay in [1000, 2000, 3000, 4500]:
             QTimer.singleShot(delay, self.update_dns_button_state)
 
@@ -1038,23 +1208,23 @@ class TrayApp:
             }
         """)
 
-        self.action_toggle = QAction("🟢 Обход активен", self.menu)
+        self.action_toggle = QAction(make_icon("circle-dot", "#4cd964"), "Обход активен", self.menu)
         self.action_toggle.setCheckable(True)
         self.action_toggle.setChecked(True)
         self.action_toggle.triggered.connect(self.toggle_proxy)
         self.menu.addAction(self.action_toggle)
 
-        self.action_dns_fix = QAction("⚡ Починить картинки лаунчера (DNS-фикс)", self.menu)
+        self.action_dns_fix = QAction(make_icon("zap", "#ffd54f"), "Починить картинки лаунчера (DNS-фикс)", self.menu)
         self.action_dns_fix.triggered.connect(self.apply_dns_fix_from_menu)
         self.menu.addAction(self.action_dns_fix)
 
         self.menu.addSeparator()
 
-        self.action_settings = QAction("⚙️ Настройки и журнал...", self.menu)
+        self.action_settings = QAction(make_icon("settings", "#aaaaaa"), "Настройки и журнал...", self.menu)
         self.action_settings.triggered.connect(self.open_settings)
         self.menu.addAction(self.action_settings)
 
-        self.action_autostart = QAction("🚀 Автозапуск с Windows", self.menu)
+        self.action_autostart = QAction(make_icon("rocket", "#aaaaaa"), "Автозапуск с Windows", self.menu)
         self.action_autostart.setCheckable(True)
         self.action_autostart.setChecked(self.settings_dialog.is_autostart_enabled())
         self.action_autostart.triggered.connect(self.toggle_autostart)
@@ -1062,21 +1232,21 @@ class TrayApp:
 
         self.menu.addSeparator()
 
-        self.action_donate = QAction("💖 Поддержать автора (Донат)...", self.menu)
+        self.action_donate = QAction(make_icon("heart", "#e6232d"), "Поддержать автора (Донат)...", self.menu)
         self.action_donate.triggered.connect(self.settings_dialog.open_donate_dialog)
         self.menu.addAction(self.action_donate)
 
-        self.action_tg_author = QAction("✈️ Telegram автора (@artehall)", self.menu)
+        self.action_tg_author = QAction(make_icon("send", "#229ED9"), "Telegram автора (@artehall)", self.menu)
         self.action_tg_author.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/artehall")))
         self.menu.addAction(self.action_tg_author)
 
-        self.action_tg_channel = QAction("📢 Личный канал автора", self.menu)
+        self.action_tg_channel = QAction(make_icon("megaphone", "#229ED9"), "Личный канал автора", self.menu)
         self.action_tg_channel.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/+IcRgeI5RJqs2NDdi")))
         self.menu.addAction(self.action_tg_channel)
 
         self.menu.addSeparator()
 
-        self.action_quit = QAction("❌ Выход", self.menu)
+        self.action_quit = QAction(make_icon("power", "#ff6b6b"), "Выход", self.menu)
         self.action_quit.triggered.connect(self.quit_app)
         self.menu.addAction(self.action_quit)
 
@@ -1094,7 +1264,20 @@ class TrayApp:
         self.dns_check_timer.start(2000)
 
     def apply_dns_fix_from_menu(self):
-        apply_hosts_dns_fix()
+        if apply_hosts_dns_fix():
+            self.tray.showMessage(
+                "Roblox Asset Proxy",
+                "DNS-фикс запущен: tr.rbxcdn.com добавляется в hosts...",
+                QSystemTrayIcon.MessageIcon.Information,
+                4000
+            )
+        else:
+            self.tray.showMessage(
+                "Roblox Asset Proxy",
+                "DNS-фикс не запущен: подтвердите запрос UAC и попробуйте снова.",
+                QSystemTrayIcon.MessageIcon.Warning,
+                4000
+            )
         for delay in [1000, 2000, 3000, 4500]:
             QTimer.singleShot(delay, self.settings_dialog.update_dns_button_state)
 
@@ -1132,15 +1315,15 @@ class TrayApp:
     def toggle_proxy(self):
         if self.action_toggle.isChecked():
             self.proxy_server.pac_manager.enable()
-            self.action_toggle.setText("🟢 Обход активен")
-            self.settings_dialog.status_label.setText("🟢 Активен (127.0.0.1:8989)")
-            self.settings_dialog.status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #4cd964;")
+            self.action_toggle.setText("Обход активен")
+            self.action_toggle.setIcon(make_icon("circle-dot", "#4cd964"))
+            self.settings_dialog.set_status_active(True)
             self.tray.setToolTip("Roblox Asset Proxy — Работает (127.0.0.1:8989)")
         else:
             self.proxy_server.pac_manager.disable()
-            self.action_toggle.setText("🔴 Обход выключен")
-            self.settings_dialog.status_label.setText("🔴 Остановлен")
-            self.settings_dialog.status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #ff3b30;")
+            self.action_toggle.setText("Обход выключен")
+            self.action_toggle.setIcon(make_icon("circle-dot", "#ff3b30"))
+            self.settings_dialog.set_status_active(False)
             self.tray.setToolTip("Roblox Asset Proxy — Остановлен")
 
     def toggle_autostart(self):
